@@ -26,10 +26,15 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python << 'PY'
-          import json, os, re, urllib.request, urllib.parse
+          import json, os, urllib.request, urllib.parse
           from html.parser import HTMLParser
+          from urllib.parse import urljoin
 
-          KEYWORDS = ["pokemon", "pokémon", "dragon ball", "one piece", "fusion world"]
+          KEYWORDS = [
+              "pokemon", "pokémon", "dragon ball", "one piece", "fusion world",
+              "booster box", "etb", "elite trainer box", "pokemon center",
+              "starter deck", "op-", "fb10", "fb11"
+          ]
 
           SITES = [
               {
@@ -40,6 +45,26 @@ jobs:
               {
                   "name": "Rumble Store - Carte Collezionabili",
                   "url": "https://www.rumble-store.com/carte-collezionabili/",
+                  "type": "html"
+              },
+              {
+                  "name": "Gallery Concept - Card Game",
+                  "url": "https://galleryconcept.it/collections/card-game/products.json",
+                  "type": "shopify"
+              },
+              {
+                  "name": "Il Covo del Nerd - Carte e Figurine",
+                  "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/",
+                  "type": "html"
+              },
+              {
+                  "name": "JPY Collectibles",
+                  "url": "https://jpycollectibles.com/",
+                  "type": "html"
+              },
+              {
+                  "name": "Toys Center - Pokemon",
+                  "url": "https://www.toyscenter.it/search?q=pokemon",
                   "type": "html"
               }
           ]
@@ -58,8 +83,16 @@ jobs:
           def send_telegram(text):
               token = os.environ["TELEGRAM_TOKEN"]
               chat_id = os.environ["TELEGRAM_CHAT_ID"]
-              data = urllib.parse.urlencode({"chat_id": chat_id, "text": text, "disable_web_page_preview": "false"}).encode()
-              urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", data=data, timeout=30)
+              data = urllib.parse.urlencode({
+                  "chat_id": chat_id,
+                  "text": text,
+                  "disable_web_page_preview": "false"
+              }).encode()
+              urllib.request.urlopen(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  data=data,
+                  timeout=30
+              )
 
           def load_seen():
               if os.path.exists(STATE_FILE):
@@ -73,11 +106,12 @@ jobs:
 
           def shopify_products(site):
               data = json.loads(fetch(site["url"]))
+              base = site["url"].split("/collections/")[0]
               products = []
               for p in data.get("products", []):
                   title = p.get("title", "")
                   handle = p.get("handle", "")
-                  url = site["url"].split("/collections/")[0] + "/products/" + handle
+                  url = base + "/products/" + handle
                   if matches(title):
                       products.append((title, url))
               return products
@@ -92,20 +126,21 @@ jobs:
                   attrs = dict(attrs)
                   href = attrs.get("href", "")
                   title = attrs.get("title", "")
+                  aria = attrs.get("aria-label", "")
+                  text = (title + " " + aria + " " + href).strip()
                   if href:
-                      self.links.append((title, href))
+                      self.links.append((text, href))
 
           def html_products(site):
               html = fetch(site["url"])
               parser = LinkParser()
               parser.feed(html)
               found = []
-              for title, href in parser.links:
-                  text = (title + " " + href).strip()
+              for text, href in parser.links:
                   if matches(text):
-                      if href.startswith("/"):
-                          href = "https://www.rumble-store.com" + href
-                      found.append((text[:120], href))
+                      full_url = urljoin(site["url"], href)
+                      title = text[:140] if text else full_url
+                      found.append((title, full_url))
               return list(dict.fromkeys(found))
 
           seen = load_seen()
@@ -113,17 +148,20 @@ jobs:
           alerts = []
 
           for site in SITES:
-              products = shopify_products(site) if site["type"] == "shopify" else html_products(site)
-              for title, url in products:
-                  key = site["name"] + "|" + title + "|" + url
-                  new_seen.add(key)
-                  if key not in seen:
-                      alerts.append(f"🚨 Nuovo prodotto su {site['name']}\n\n{title}\n{url}")
+              try:
+                  products = shopify_products(site) if site["type"] == "shopify" else html_products(site)
+                  for title, url in products:
+                      key = site["name"] + "|" + title + "|" + url
+                      new_seen.add(key)
+                      if key not in seen:
+                          alerts.append(f"🚨 Nuovo prodotto su {site['name']}\n\n{title}\n{url}")
+              except Exception as e:
+                  print(f"Errore su {site['name']}: {e}")
 
           if not os.path.exists(STATE_FILE):
-              send_telegram("✅ Monitor inizializzato. Da ora ti avviso solo sui nuovi prodotti Dragon Ball, One Piece e Pokémon.")
+              send_telegram("✅ Monitor aggiornato e inizializzato. Ora controllo Team Rocket, Rumble, Gallery Concept, Il Covo del Nerd, JPY Collectibles e Toys Center.")
           else:
-              for alert in alerts[:10]:
+              for alert in alerts[:15]:
                   send_telegram(alert)
 
           save_seen(new_seen)
