@@ -37,36 +37,12 @@ jobs:
           ]
 
           SITES = [
-              {
-                  "name": "Team Rocket Italia - Preordini",
-                  "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json",
-                  "type": "shopify"
-              },
-              {
-                  "name": "Rumble Store - Carte Collezionabili",
-                  "url": "https://www.rumble-store.com/carte-collezionabili/",
-                  "type": "html"
-              },
-              {
-                  "name": "Gallery Concept - Card Game",
-                  "url": "https://galleryconcept.it/collections/card-game/products.json",
-                  "type": "shopify"
-              },
-              {
-                  "name": "Il Covo del Nerd - Carte e Figurine",
-                  "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/",
-                  "type": "html"
-              },
-              {
-                  "name": "JPY Collectibles",
-                  "url": "https://jpycollectibles.com/",
-                  "type": "html"
-              },
-              {
-                  "name": "Toys Center - Pokemon",
-                  "url": "https://www.toyscenter.it/search?q=pokemon",
-                  "type": "html"
-              }
+              {"name": "Team Rocket Italia - Preordini", "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json", "type": "shopify"},
+              {"name": "Rumble Store - Carte Collezionabili", "url": "https://www.rumble-store.com/carte-collezionabili/", "type": "html"},
+              {"name": "Gallery Concept - Card Game", "url": "https://galleryconcept.it/collections/card-game/products.json", "type": "shopify"},
+              {"name": "Il Covo del Nerd - Carte e Figurine", "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/", "type": "html"},
+              {"name": "JPY Collectibles", "url": "https://jpycollectibles.com/", "type": "html"},
+              {"name": "Toys Center - Pokemon", "url": "https://www.toyscenter.it/search?q=pokemon", "type": "html"}
           ]
 
           STATE_FILE = "seen_products.json"
@@ -77,19 +53,16 @@ jobs:
                   return r.read().decode("utf-8", errors="ignore")
 
           def matches(text):
-              t = text.lower()
-              return any(k in t for k in KEYWORDS)
+              return any(k in text.lower() for k in KEYWORDS)
 
           def send_telegram(text):
-              token = os.environ["TELEGRAM_TOKEN"]
-              chat_id = os.environ["TELEGRAM_CHAT_ID"]
               data = urllib.parse.urlencode({
-                  "chat_id": chat_id,
+                  "chat_id": os.environ["TELEGRAM_CHAT_ID"],
                   "text": text,
                   "disable_web_page_preview": "false"
               }).encode()
               urllib.request.urlopen(
-                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
                   data=data,
                   timeout=30
               )
@@ -120,6 +93,7 @@ jobs:
               def __init__(self):
                   super().__init__()
                   self.links = []
+
               def handle_starttag(self, tag, attrs):
                   if tag != "a":
                       return
@@ -159,7 +133,7 @@ jobs:
                   print(f"Errore su {site['name']}: {e}")
 
           if not os.path.exists(STATE_FILE):
-              send_telegram("✅ Monitor aggiornato e inizializzato. Ora controllo Team Rocket, Rumble, Gallery Concept, Il Covo del Nerd, JPY Collectibles e Toys Center.")
+              send_telegram("✅ Monitor inizializzato. Da ora controllo i siti collezionabili per Pokémon, Dragon Ball e One Piece.")
           else:
               for alert in alerts[:15]:
                   send_telegram(alert)
@@ -171,6 +145,7 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+          git pull --rebase origin main || true
           git add seen_products.json
           git commit -m "Update seen products" || echo "No changes"
-          git push
+          git push || echo "Push skipped"
