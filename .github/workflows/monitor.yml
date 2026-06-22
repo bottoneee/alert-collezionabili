@@ -1,196 +1,155 @@
 name: Alert Collezionabili
 
 on:
-schedule:
-- cron: '*/15 * * * *'
-workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
 
 permissions:
-contents: write
+  contents: write
 
 jobs:
-monitor:
-runs-on: ubuntu-latest
+  monitor:
+    runs-on: ubuntu-latest
 
-```
-steps:
-  - uses: actions/checkout@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  - name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: '3.11'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-  - name: Monitor products
-    env:
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-    run: |
-      python << 'PY'
-      import json, os, urllib.request, urllib.parse
-      from html.parser import HTMLParser
-      from urllib.parse import urljoin
+      - name: Monitor products
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python << 'PY'
+          import json, os, urllib.request, urllib.parse
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin
 
-      KEYWORDS = [
-          "pokemon",
-          "pokémon",
-          "dragon ball",
-          "fusion world",
-          "one piece",
-          "booster box",
-          "etb",
-          "elite trainer box",
-          "pokemon center",
-          "starter deck",
-          "gift collection",
-          "premium collection",
-          "super premium collection",
-          "collector booster",
-          "premium booster",
-          "anniversary",
-          "151",
-          "english",
-          "japanese",
-          "op-",
-          "fb10",
-          "fb11"
-      ]
+          KEYWORDS = [
+              "pokemon", "pokémon", "dragon ball", "fusion world", "one piece",
+              "booster box", "etb", "elite trainer box", "pokemon center",
+              "starter deck", "gift collection", "premium collection",
+              "super premium collection", "collector booster", "premium booster",
+              "anniversary", "151", "english", "japanese", "op-", "fb10", "fb11"
+          ]
 
-      SITES = [
-          {"name": "Team Rocket Italia - Preordini", "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json", "type": "shopify"},
-          {"name": "Rumble Store - Carte Collezionabili", "url": "https://www.rumble-store.com/carte-collezionabili/", "type": "html"},
-          {"name": "Gallery Concept - Card Game", "url": "https://galleryconcept.it/collections/card-game/products.json", "type": "shopify"},
-          {"name": "Il Covo del Nerd - Carte e Figurine", "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/", "type": "html"},
-          {"name": "JPY Collectibles", "url": "https://jpycollectibles.com/", "type": "html"},
-          {"name": "Toys Center - Pokemon", "url": "https://www.toyscenter.it/search?q=pokemon", "type": "html"},
-          {"name": "Goathings", "url": "https://goathings.it/", "type": "html"},
-          {"name": "Mangakaze", "url": "https://www.mangakaze.com/", "type": "html"},
-          {"name": "Mirabilia Store", "url": "https://mirabiliastore.it/", "type": "html"}
-      ]
+          SITES = [
+              {"name": "Team Rocket Italia", "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json", "type": "shopify"},
+              {"name": "Rumble Store", "url": "https://www.rumble-store.com/carte-collezionabili/", "type": "html"},
+              {"name": "Gallery Concept", "url": "https://galleryconcept.it/collections/card-game/products.json", "type": "shopify"},
+              {"name": "Il Covo del Nerd", "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/", "type": "html"},
+              {"name": "JPY Collectibles", "url": "https://jpycollectibles.com/", "type": "html"},
+              {"name": "Toys Center", "url": "https://www.toyscenter.it/search?q=pokemon", "type": "html"},
+              {"name": "Goathings", "url": "https://goathings.it/", "type": "html"},
+              {"name": "Mangakaze", "url": "https://www.mangakaze.com/", "type": "html"},
+              {"name": "Mirabilia Store", "url": "https://mirabiliastore.it/", "type": "html"}
+          ]
 
-      STATE_FILE = "seen_products.json"
+          STATE_FILE = "seen_products.json"
 
-      def fetch(url):
-          req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-          with urllib.request.urlopen(req, timeout=30) as r:
-              return r.read().decode("utf-8", errors="ignore")
+          def fetch(url):
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return r.read().decode("utf-8", errors="ignore")
 
-      def matches(text):
-          return any(k in text.lower() for k in KEYWORDS)
+          def matches(text):
+              return any(k in text.lower() for k in KEYWORDS)
 
-      def send_telegram(text):
-          data = urllib.parse.urlencode({
-              "chat_id": os.environ["TELEGRAM_CHAT_ID"],
-              "text": text,
-              "disable_web_page_preview": "false"
-          }).encode()
+          def send_telegram(text):
+              data = urllib.parse.urlencode({
+                  "chat_id": os.environ["TELEGRAM_CHAT_ID"],
+                  "text": text,
+                  "disable_web_page_preview": "false"
+              }).encode()
+              urllib.request.urlopen(
+                  f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
+                  data=data,
+                  timeout=30
+              )
 
-          urllib.request.urlopen(
-              f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
-              data=data,
-              timeout=30
-          )
+          def load_seen():
+              if os.path.exists(STATE_FILE):
+                  with open(STATE_FILE, "r", encoding="utf-8") as f:
+                      return set(json.load(f))
+              return set()
 
-      def load_seen():
-          if os.path.exists(STATE_FILE):
-              with open(STATE_FILE, "r", encoding="utf-8") as f:
-                  return set(json.load(f))
-          return set()
+          def save_seen(seen):
+              with open(STATE_FILE, "w", encoding="utf-8") as f:
+                  json.dump(sorted(seen), f, ensure_ascii=False, indent=2)
 
-      def save_seen(seen):
-          with open(STATE_FILE, "w", encoding="utf-8") as f:
-              json.dump(sorted(seen), f, ensure_ascii=False, indent=2)
+          def shopify_products(site):
+              data = json.loads(fetch(site["url"]))
+              base = site["url"].split("/collections/")[0]
+              result = []
+              for p in data.get("products", []):
+                  title = p.get("title", "")
+                  handle = p.get("handle", "")
+                  url = base + "/products/" + handle
+                  if matches(title):
+                      result.append((title, url))
+              return result
 
-      def shopify_products(site):
-          data = json.loads(fetch(site["url"]))
-          base = site["url"].split("/collections/")[0]
+          class LinkParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.links = []
 
-          products = []
+              def handle_starttag(self, tag, attrs):
+                  if tag == "a":
+                      attrs = dict(attrs)
+                      href = attrs.get("href", "")
+                      title = attrs.get("title", "")
+                      aria = attrs.get("aria-label", "")
+                      text = (title + " " + aria + " " + href).strip()
+                      if href:
+                          self.links.append((text, href))
 
-          for p in data.get("products", []):
-              title = p.get("title", "")
-              handle = p.get("handle", "")
-              url = base + "/products/" + handle
+          def html_products(site):
+              html = fetch(site["url"])
+              parser = LinkParser()
+              parser.feed(html)
+              found = []
+              for text, href in parser.links:
+                  if matches(text):
+                      full_url = urljoin(site["url"], href)
+                      title = text[:140] if text else full_url
+                      found.append((title, full_url))
+              return list(dict.fromkeys(found))
 
-              if matches(title):
-                  products.append((title, url))
+          seen = load_seen()
+          new_seen = set(seen)
+          alerts = []
 
-          return products
+          for site in SITES:
+              try:
+                  products = shopify_products(site) if site["type"] == "shopify" else html_products(site)
+                  for title, url in products:
+                      key = site["name"] + "|" + title + "|" + url
+                      new_seen.add(key)
+                      if key not in seen:
+                          alerts.append(f"🚨 Nuovo prodotto su {site['name']}\n\n{title}\n{url}")
+              except Exception as e:
+                  print(f"Errore su {site['name']}: {e}")
 
-      class LinkParser(HTMLParser):
-          def __init__(self):
-              super().__init__()
-              self.links = []
+          if not os.path.exists(STATE_FILE):
+              send_telegram("✅ Monitor inizializzato. Da ora controllo Pokémon, Dragon Ball e One Piece sui siti monitorati.")
+          else:
+              for alert in alerts[:15]:
+                  send_telegram(alert)
 
-          def handle_starttag(self, tag, attrs):
-              if tag != "a":
-                  return
+          save_seen(new_seen)
+          PY
 
-              attrs = dict(attrs)
-
-              href = attrs.get("href", "")
-              title = attrs.get("title", "")
-              aria = attrs.get("aria-label", "")
-
-              text = (title + " " + aria + " " + href).strip()
-
-              if href:
-                  self.links.append((text, href))
-
-      def html_products(site):
-          html = fetch(site["url"])
-
-          parser = LinkParser()
-          parser.feed(html)
-
-          found = []
-
-          for text, href in parser.links:
-              if matches(text):
-                  full_url = urljoin(site["url"], href)
-                  title = text[:140] if text else full_url
-                  found.append((title, full_url))
-
-          return list(dict.fromkeys(found))
-
-      seen = load_seen()
-      new_seen = set(seen)
-      alerts = []
-
-      for site in SITES:
-          try:
-              products = shopify_products(site) if site["type"] == "shopify" else html_products(site)
-
-              for title, url in products:
-                  key = site["name"] + "|" + title + "|" + url
-
-                  new_seen.add(key)
-
-                  if key not in seen:
-                      alerts.append(
-                          f"🚨 Nuovo prodotto su {site['name']}\n\n{title}\n{url}"
-                      )
-
-          except Exception as e:
-              print(f"Errore su {site['name']}: {e}")
-
-      if not os.path.exists(STATE_FILE):
-          send_telegram(
-              "✅ Monitor inizializzato. Da ora controllo Pokémon, Dragon Ball e One Piece sui siti monitorati."
-          )
-      else:
-          for alert in alerts[:15]:
-              send_telegram(alert)
-
-      save_seen(new_seen)
-      PY
-
-  - name: Commit state
-    run: |
-      git config user.name "github-actions"
-      git config user.email "github-actions@github.com"
-      git pull --rebase origin main || true
-      git add seen_products.json
-      git commit -m "Update seen products" || echo "No changes"
-      git push || echo "Push skipped"
-```
+      - name: Commit state
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git pull --rebase origin main || true
+          git add seen_products.json
+          git commit -m "Update seen products" || echo "No changes"
