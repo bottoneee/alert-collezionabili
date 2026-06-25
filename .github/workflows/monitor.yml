@@ -27,9 +27,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python << 'PY'
-          import json, os, urllib.request, urllib.parse
+          import json, os, re, urllib.request, urllib.parse
           from html.parser import HTMLParser
-          from urllib.parse import urljoin
+          from urllib.parse import urljoin, urlparse, urlunparse
 
           KEYWORDS = [
               "pokemon", "pokémon", "dragon ball", "fusion world", "one piece",
@@ -37,6 +37,11 @@ jobs:
               "starter deck", "gift collection", "premium collection",
               "super premium collection", "collector booster", "premium booster",
               "anniversary", "151", "english", "japanese", "op-", "fb10", "fb11"
+          ]
+
+          STOCK_WORDS = [
+              "disponibile", "aggiungi al carrello", "acquista", "preordina",
+              "pre-ordina", "prenota", "in stock", "available"
           ]
 
           SITES = [
@@ -53,13 +58,26 @@ jobs:
 
           STATE_FILE = "seen_products.json"
 
+          def clean_url(url):
+              parsed = urlparse(url)
+              return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+
+          def clean_text(text):
+              text = re.sub(r"\s+", " ", text or "").strip()
+              return text[:160]
+
           def fetch(url):
               req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
               with urllib.request.urlopen(req, timeout=30) as r:
                   return r.read().decode("utf-8", errors="ignore")
 
           def matches(text):
-              return any(k in text.lower() for k in KEYWORDS)
+              t = text.lower()
+              return any(k in t for k in KEYWORDS)
+
+          def is_available(text):
+              t = text.lower()
+              return any(w in t for w in STOCK_WORDS)
 
           def send_telegram(text):
               data = urllib.parse.urlencode({
@@ -67,6 +85,7 @@ jobs:
                   "text": text,
                   "disable_web_page_preview": "false"
               }).encode()
+
               urllib.request.urlopen(
                   f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
                   data=data,
@@ -76,23 +95,36 @@ jobs:
           def load_seen():
               if os.path.exists(STATE_FILE):
                   with open(STATE_FILE, "r", encoding="utf-8") as f:
-                      return set(json.load(f))
-              return set()
+                      return json.load(f)
+              return {}
 
           def save_seen(seen):
               with open(STATE_FILE, "w", encoding="utf-8") as f:
-                  json.dump(sorted(seen), f, ensure_ascii=False, indent=2)
+                  json.dump(seen, f, ensure_ascii=False, indent=2, sort_keys=True)
 
           def shopify_products(site):
               data = json.loads(fetch(site["url"]))
               base = site["url"].split("/collections/")[0]
               result = []
+
               for p in data.get("products", []):
-                  title = p.get("title", "")
+                  title = clean_text(p.get("title", ""))
                   handle = p.get("handle", "")
-                  url = base + "/products/" + handle
+                  url = clean_url(base + "/products/" + handle)
+
+                  available = False
+                  for v in p.get("variants", []):
+                      if v.get("available") is True:
+                          available = True
+
                   if matches(title):
-                      result.append((title, url))
+                      result.append({
+                          "site": site["name"],
+                          "title": title,
+                          "url": url,
+                          "available": available
+                      })
+
               return result
 
           class LinkParser(HTMLParser):
@@ -106,7 +138,8 @@ jobs:
                       href = attrs.get("href", "")
                       title = attrs.get("title", "")
                       aria = attrs.get("aria-label", "")
-                      text = (title + " " + aria + " " + href).strip()
+                      text = clean_text(title + " " + aria + " " + href)
+
                       if href:
                           self.links.append((text, href))
 
@@ -114,36 +147,62 @@ jobs:
               html = fetch(site["url"])
               parser = LinkParser()
               parser.feed(html)
-              found = []
+
+              found = {}
+
               for text, href in parser.links:
-                  if matches(text):
-                      full_url = urljoin(site["url"], href)
-                      title = text[:140] if text else full_url
-                      found.append((title, full_url))
-              return list(dict.fromkeys(found))
+                  full_url = clean_url(urljoin(site["url"], href))
+                  combined = clean_text(text + " " + full_url)
+
+                  if matches(combined):
+                      found[full_url] = {
+                          "site": site["name"],
+                          "title": combined,
+                          "url": full_url,
+                          "available": is_available(html)
+                      }
+
+              return list(found.values())
 
           seen = load_seen()
-          new_seen = set(seen)
           alerts = []
 
           for site in SITES:
               try:
                   products = shopify_products(site) if site["type"] == "shopify" else html_products(site)
-                  for title, url in products:
-                      key = site["name"] + "|" + title + "|" + url
-                      new_seen.add(key)
-                      if key not in seen:
-                          alerts.append(f"🚨 Nuovo prodotto su {site['name']}\n\n{title}\n{url}")
+
+                  for p in products:
+                      key = p["site"] + "|" + p["url"]
+                      old = seen.get(key)
+
+                      current_status = "available" if p["available"] else "seen"
+
+                      if old is None:
+                          seen[key] = {
+                              "title": p["title"],
+                              "url": p["url"],
+                              "status": current_status
+                          }
+                          alerts.append(
+                              f"🚨 Nuovo prodotto su {p['site']}\n\n{p['title']}\n{p['url']}"
+                          )
+
+                      elif old.get("status") != "available" and p["available"]:
+                          seen[key]["status"] = "available"
+                          alerts.append(
+                              f"🔄 Possibile restock/disponibilità su {p['site']}\n\n{p['title']}\n{p['url']}"
+                          )
+
               except Exception as e:
                   print(f"Errore su {site['name']}: {e}")
 
           if not os.path.exists(STATE_FILE):
-              send_telegram("✅ Monitor inizializzato. Da ora controllo Pokémon, Dragon Ball e One Piece sui siti monitorati.")
+              send_telegram("✅ Monitor inizializzato. Da ora controllo nuovi prodotti e possibili restock.")
           else:
               for alert in alerts[:15]:
                   send_telegram(alert)
 
-          save_seen(new_seen)
+          save_seen(seen)
           PY
 
       - name: Commit state
@@ -153,3 +212,4 @@ jobs:
           git pull --rebase origin main || true
           git add seen_products.json
           git commit -m "Update seen products" || echo "No changes"
+          git push || echo "Push skipped"
