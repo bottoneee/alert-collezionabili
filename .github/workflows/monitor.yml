@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: alert-collezionabili
+  cancel-in-progress: true
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -33,21 +37,18 @@ jobs:
 
           KEYWORDS = [
               "pokemon", "pokémon", "dragon ball", "fusion world", "one piece",
-              "booster box", "etb", "elite trainer box", "pokemon center",
+              "booster box", "display", "etb", "elite trainer box", "pokemon center",
               "starter deck", "gift collection", "premium collection",
               "super premium collection", "collector booster", "premium booster",
-              "anniversary", "151", "english", "japanese", "op-", "fb10", "fb11"
-          ]
-
-          STOCK_WORDS = [
-              "disponibile", "aggiungi al carrello", "acquista", "preordina",
-              "pre-ordina", "prenota", "in stock", "available"
+              "anniversary", "151", "english", "japanese",
+              "op-", "op01", "op02", "op03", "op04", "op05", "op06", "op07", "op08", "op09", "op10", "op11", "op12",
+              "fb10", "fb11", "fb12"
           ]
 
           SITES = [
-              {"name": "Team Rocket Italia", "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json", "type": "shopify"},
+              {"name": "Team Rocket Italia", "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json?limit=250", "type": "shopify"},
+              {"name": "Gallery Concept", "url": "https://galleryconcept.it/collections/card-game/products.json?limit=250", "type": "shopify"},
               {"name": "Rumble Store", "url": "https://www.rumble-store.com/carte-collezionabili/", "type": "html"},
-              {"name": "Gallery Concept", "url": "https://galleryconcept.it/collections/card-game/products.json", "type": "shopify"},
               {"name": "Il Covo del Nerd", "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/", "type": "html"},
               {"name": "JPY Collectibles", "url": "https://jpycollectibles.com/", "type": "html"},
               {"name": "Toys Center", "url": "https://www.toyscenter.it/search?q=pokemon", "type": "html"},
@@ -58,16 +59,34 @@ jobs:
 
           STATE_FILE = "seen_products.json"
 
+          PRODUCT_PATH_HINTS = [
+              "/products/",
+              "/product/",
+              "/prodotto/",
+              "/shop/",
+              "/cartes/",
+              "/collections/"
+          ]
+
+          BAD_HINTS = [
+              "account", "login", "carrello", "cart", "checkout", "wishlist",
+              "privacy", "cookie", "contatti", "contact", "search", "categoria-prodotto",
+              "tag/", "category/", "blog", "instagram", "facebook", "whatsapp"
+          ]
+
           def clean_url(url):
               parsed = urlparse(url)
               return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
 
           def clean_text(text):
               text = re.sub(r"\s+", " ", text or "").strip()
-              return text[:160]
+              return text[:180]
 
           def fetch(url):
-              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              req = urllib.request.Request(url, headers={
+                  "User-Agent": "Mozilla/5.0",
+                  "Accept": "text/html,application/json"
+              })
               with urllib.request.urlopen(req, timeout=30) as r:
                   return r.read().decode("utf-8", errors="ignore")
 
@@ -75,9 +94,11 @@ jobs:
               t = text.lower()
               return any(k in t for k in KEYWORDS)
 
-          def is_available(text):
-              t = text.lower()
-              return any(w in t for w in STOCK_WORDS)
+          def looks_like_product_url(url):
+              u = url.lower()
+              if any(bad in u for bad in BAD_HINTS):
+                  return False
+              return any(h in u for h in PRODUCT_PATH_HINTS)
 
           def send_telegram(text):
               data = urllib.parse.urlencode({
@@ -112,25 +133,22 @@ jobs:
                   handle = p.get("handle", "")
                   url = clean_url(base + "/products/" + handle)
 
-                  available = False
-                  for v in p.get("variants", []):
-                      if v.get("available") is True:
-                          available = True
-
-                  if matches(title):
+                  if title and matches(title):
                       result.append({
                           "site": site["name"],
                           "title": title,
-                          "url": url,
-                          "available": available
+                          "url": url
                       })
 
               return result
 
-          class LinkParser(HTMLParser):
+          class ProductLinkParser(HTMLParser):
               def __init__(self):
                   super().__init__()
                   self.links = []
+                  self.in_a = False
+                  self.current_href = ""
+                  self.current_text = ""
 
               def handle_starttag(self, tag, attrs):
                   if tag == "a":
@@ -138,14 +156,26 @@ jobs:
                       href = attrs.get("href", "")
                       title = attrs.get("title", "")
                       aria = attrs.get("aria-label", "")
-                      text = clean_text(title + " " + aria + " " + href)
 
-                      if href:
-                          self.links.append((text, href))
+                      self.in_a = True
+                      self.current_href = href
+                      self.current_text = clean_text(title + " " + aria)
+
+              def handle_data(self, data):
+                  if self.in_a:
+                      self.current_text += " " + clean_text(data)
+
+              def handle_endtag(self, tag):
+                  if tag == "a" and self.in_a:
+                      if self.current_href:
+                          self.links.append((clean_text(self.current_text), self.current_href))
+                      self.in_a = False
+                      self.current_href = ""
+                      self.current_text = ""
 
           def html_products(site):
               html = fetch(site["url"])
-              parser = LinkParser()
+              parser = ProductLinkParser()
               parser.feed(html)
 
               found = {}
@@ -154,16 +184,16 @@ jobs:
                   full_url = clean_url(urljoin(site["url"], href))
                   combined = clean_text(text + " " + full_url)
 
-                  if matches(combined):
+                  if looks_like_product_url(full_url) and matches(combined):
                       found[full_url] = {
                           "site": site["name"],
-                          "title": combined,
-                          "url": full_url,
-                          "available": is_available(html)
+                          "title": text if text else full_url,
+                          "url": full_url
                       }
 
               return list(found.values())
 
+          state_exists = os.path.exists(STATE_FILE)
           seen = load_seen()
           alerts = []
 
@@ -171,35 +201,29 @@ jobs:
               try:
                   products = shopify_products(site) if site["type"] == "shopify" else html_products(site)
 
+                  print(f"{site['name']}: trovati {len(products)} prodotti compatibili")
+
                   for p in products:
                       key = p["site"] + "|" + p["url"]
-                      old = seen.get(key)
 
-                      current_status = "available" if p["available"] else "seen"
-
-                      if old is None:
+                      if key not in seen:
                           seen[key] = {
                               "title": p["title"],
-                              "url": p["url"],
-                              "status": current_status
+                              "url": p["url"]
                           }
-                          alerts.append(
-                              f"🚨 Nuovo prodotto su {p['site']}\n\n{p['title']}\n{p['url']}"
-                          )
 
-                      elif old.get("status") != "available" and p["available"]:
-                          seen[key]["status"] = "available"
-                          alerts.append(
-                              f"🔄 Possibile restock/disponibilità su {p['site']}\n\n{p['title']}\n{p['url']}"
-                          )
+                          if state_exists:
+                              alerts.append(
+                                  f"🚨 Nuovo prodotto su {p['site']}\n\n{p['title']}\n{p['url']}"
+                              )
 
               except Exception as e:
                   print(f"Errore su {site['name']}: {e}")
 
-          if not os.path.exists(STATE_FILE):
-              send_telegram("✅ Monitor inizializzato. Da ora controllo nuovi prodotti e possibili restock.")
+          if not state_exists:
+              send_telegram("✅ Monitor reinizializzato. Ho salvato i prodotti già presenti: da ora ti avviso solo sui nuovi caricamenti.")
           else:
-              for alert in alerts[:15]:
+              for alert in alerts[:20]:
                   send_telegram(alert)
 
           save_seen(seen)
