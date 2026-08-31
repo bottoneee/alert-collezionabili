@@ -30,204 +30,767 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python << 'PY'
-          import json, os, re, urllib.request, urllib.parse
+          cat > monitor.py << 'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+          import urllib.parse
           from html.parser import HTMLParser
           from urllib.parse import urljoin, urlparse, urlunparse
 
+          STATE_FILE = "seen_products.json"
+
           KEYWORDS = [
-              "pokemon", "pokémon", "dragon ball", "fusion world", "one piece",
-              "booster box", "display", "etb", "elite trainer box", "pokemon center",
-              "starter deck", "gift collection", "premium collection",
-              "super premium collection", "collector booster", "premium booster",
-              "anniversary", "151", "english", "japanese",
-              "op-", "op01", "op02", "op03", "op04", "op05", "op06", "op07", "op08", "op09", "op10", "op11", "op12",
-              "fb10", "fb11", "fb12"
+              "pokemon",
+              "pokémon",
+              "dragon ball",
+              "fusion world",
+              "one piece",
+              "booster box",
+              "booster",
+              "display",
+              "etb",
+              "elite trainer box",
+              "pokemon center",
+              "starter deck",
+              "gift collection",
+              "premium collection",
+              "super premium collection",
+              "collector booster",
+              "premium booster",
+              "anniversary",
+              "151",
+              "english",
+              "japanese",
+              "op-",
+              "op01",
+              "op02",
+              "op03",
+              "op04",
+              "op05",
+              "op06",
+              "op07",
+              "op08",
+              "op09",
+              "op10",
+              "op11",
+              "op12",
+              "op13",
+              "op14",
+              "op15",
+              "op16",
+              "op17",
+              "op18",
+              "fb10",
+              "fb11",
+              "fb12"
           ]
 
           SITES = [
-              {"name": "Team Rocket Italia", "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json?limit=250", "type": "shopify"},
-              {"name": "Gallery Concept", "url": "https://galleryconcept.it/collections/card-game/products.json?limit=250", "type": "shopify"},
-              {"name": "Rumble Store", "url": "https://www.rumble-store.com/carte-collezionabili/", "type": "html"},
-              {"name": "Il Covo del Nerd", "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/", "type": "html"},
-              {"name": "JPY Collectibles", "url": "https://jpycollectibles.com/", "type": "html"},
-              {"name": "Toys Center", "url": "https://www.toyscenter.it/search?q=pokemon", "type": "html"},
-              {"name": "Goathings", "url": "https://goathings.it/", "type": "html"},
-              {"name": "Mangakaze", "url": "https://www.mangakaze.com/", "type": "html"},
-              {"name": "Mirabilia Store", "url": "https://mirabiliastore.it/", "type": "html"}
+              {
+                  "name": "Team Rocket Italia",
+                  "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json?limit=250",
+                  "type": "shopify"
+              },
+              {
+                  "name": "Gallery Concept",
+                  "url": "https://galleryconcept.it/collections/card-game/products.json?limit=250",
+                  "type": "shopify"
+              },
+              {
+                  "name": "Rumble Store",
+                  "url": "https://www.rumble-store.com/carte-collezionabili/",
+                  "type": "rumble"
+              },
+              {
+                  "name": "Il Covo del Nerd",
+                  "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/",
+                  "type": "html"
+              },
+              {
+                  "name": "JPY Collectibles",
+                  "url": "https://jpycollectibles.com/",
+                  "type": "html"
+              },
+              {
+                  "name": "Toys Center",
+                  "url": "https://www.toyscenter.it/search?q=pokemon",
+                  "type": "html"
+              },
+              {
+                  "name": "Goathings",
+                  "url": "https://goathings.it/",
+                  "type": "html"
+              },
+              {
+                  "name": "Mangakaze",
+                  "url": "https://www.mangakaze.com/",
+                  "type": "html"
+              },
+              {
+                  "name": "Mirabilia Store",
+                  "url": "https://mirabiliastore.it/",
+                  "type": "html"
+              }
           ]
 
-          STATE_FILE = "seen_products.json"
-
-          PRODUCT_PATH_HINTS = [
-              "/products/",
-              "/product/",
-              "/prodotto/",
-              "/shop/",
-              "/cartes/",
-              "/collections/"
+          BAD_PATHS = [
+              "/collections/",
+              "/collection/",
+              "/category/",
+              "/categorie/",
+              "/categoria/",
+              "/categoria-prodotto/",
+              "/tag/",
+              "/pages/",
+              "/page/",
+              "/blog/",
+              "/search",
+              "/account",
+              "/cart",
+              "/carrello",
+              "/checkout",
+              "/wishlist"
           ]
 
-          BAD_HINTS = [
-              "account", "login", "carrello", "cart", "checkout", "wishlist",
-              "privacy", "cookie", "contatti", "contact", "search", "categoria-prodotto",
-              "tag/", "category/", "blog", "instagram", "facebook", "whatsapp"
-          ]
+          def clean_text(text):
+              return re.sub(r"\s+", " ", text or "").strip()
 
           def clean_url(url):
               parsed = urlparse(url)
-              return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
-
-          def clean_text(text):
-              text = re.sub(r"\s+", " ", text or "").strip()
-              return text[:180]
-
-          def fetch(url):
-              req = urllib.request.Request(url, headers={
-                  "User-Agent": "Mozilla/5.0",
-                  "Accept": "text/html,application/json"
-              })
-              with urllib.request.urlopen(req, timeout=30) as r:
-                  return r.read().decode("utf-8", errors="ignore")
-
-          def matches(text):
-              t = text.lower()
-              return any(k in t for k in KEYWORDS)
-
-          def looks_like_product_url(url):
-              u = url.lower()
-              if any(bad in u for bad in BAD_HINTS):
-                  return False
-              return any(h in u for h in PRODUCT_PATH_HINTS)
-
-          def send_telegram(text):
-              data = urllib.parse.urlencode({
-                  "chat_id": os.environ["TELEGRAM_CHAT_ID"],
-                  "text": text,
-                  "disable_web_page_preview": "false"
-              }).encode()
-
-              urllib.request.urlopen(
-                  f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
-                  data=data,
-                  timeout=30
+              return urlunparse(
+                  (
+                      parsed.scheme,
+                      parsed.netloc,
+                      parsed.path.rstrip("/"),
+                      "",
+                      "",
+                      ""
+                  )
               )
 
-          def load_seen():
-              if os.path.exists(STATE_FILE):
-                  with open(STATE_FILE, "r", encoding="utf-8") as f:
-                      return json.load(f)
-              return {}
+          def fetch(url):
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "User-Agent": "Mozilla/5.0",
+                      "Accept": "text/html,application/json"
+                  }
+              )
 
-          def save_seen(seen):
-              with open(STATE_FILE, "w", encoding="utf-8") as f:
-                  json.dump(seen, f, ensure_ascii=False, indent=2, sort_keys=True)
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return response.read().decode(
+                      "utf-8",
+                      errors="ignore"
+                  )
 
-          def shopify_products(site):
-              data = json.loads(fetch(site["url"]))
-              base = site["url"].split("/collections/")[0]
-              result = []
+          def matches(text):
+              text = (text or "").lower()
+              return any(keyword in text for keyword in KEYWORDS)
 
-              for p in data.get("products", []):
-                  title = clean_text(p.get("title", ""))
-                  handle = p.get("handle", "")
-                  url = clean_url(base + "/products/" + handle)
+          def is_bad_url(url):
+              url = url.lower()
 
-                  if title and matches(title):
-                      result.append({
+              for bad in BAD_PATHS:
+                  if bad in url:
+                      return True
+
+              return False
+
+          def send_telegram(message):
+              data = urllib.parse.urlencode(
+                  {
+                      "chat_id": os.environ["TELEGRAM_CHAT_ID"],
+                      "text": message,
+                      "disable_web_page_preview": "false"
+                  }
+              ).encode()
+
+              request = urllib.request.Request(
+                  f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
+                  data=data
+              )
+
+              urllib.request.urlopen(request, timeout=30)
+
+          def load_state():
+              if not os.path.exists(STATE_FILE):
+                  return {}
+
+              try:
+                  with open(
+                      STATE_FILE,
+                      "r",
+                      encoding="utf-8"
+                  ) as file:
+                      raw = json.load(file)
+              except Exception:
+                  return {}
+
+              state = {}
+
+              # Migrazione dal vecchio formato:
+              # lista di stringhe -> dizionario
+              if isinstance(raw, list):
+                  for item in raw:
+                      if not isinstance(item, str):
+                          continue
+
+                      parts = item.split("|")
+
+                      if len(parts) >= 3:
+                          site = parts[0]
+                          title = parts[1]
+                          url = clean_url("|".join(parts[2:]))
+
+                          if not is_bad_url(url):
+                              key = site + "|" + url
+
+                              state[key] = {
+                                  "site": site,
+                                  "title": title,
+                                  "url": url,
+                                  "available": None
+                              }
+
+                  return state
+
+              if isinstance(raw, dict):
+                  for key, value in raw.items():
+                      if not isinstance(value, dict):
+                          continue
+
+                      url = clean_url(
+                          value.get("url", "")
+                      )
+
+                      if not url:
+                          continue
+
+                      if is_bad_url(url):
+                          continue
+
+                      state[key] = value
+
+              return state
+
+          def save_state(state):
+              with open(
+                  STATE_FILE,
+                  "w",
+                  encoding="utf-8"
+              ) as file:
+                  json.dump(
+                      state,
+                      file,
+                      ensure_ascii=False,
+                      indent=2,
+                      sort_keys=True
+                  )
+
+          def parse_shopify(site):
+              data = json.loads(
+                  fetch(site["url"])
+              )
+
+              base = site["url"].split(
+                  "/collections/"
+              )[0]
+
+              products = []
+
+              for product in data.get(
+                  "products",
+                  []
+              ):
+                  title = clean_text(
+                      product.get(
+                          "title",
+                          ""
+                      )
+                  )
+
+                  handle = product.get(
+                      "handle",
+                      ""
+                  )
+
+                  if not title or not handle:
+                      continue
+
+                  if not matches(title):
+                      continue
+
+                  url = clean_url(
+                      base
+                      + "/products/"
+                      + handle
+                  )
+
+                  available = any(
+                      variant.get("available") is True
+                      for variant in product.get(
+                          "variants",
+                          []
+                      )
+                  )
+
+                  products.append(
+                      {
                           "site": site["name"],
                           "title": title,
-                          "url": url
-                      })
+                          "url": url,
+                          "available": available
+                      }
+                  )
 
-              return result
+              return products
 
-          class ProductLinkParser(HTMLParser):
+          class RumbleParser(HTMLParser):
+
               def __init__(self):
                   super().__init__()
-                  self.links = []
+
+                  self.products = []
+
+                  self.in_article = False
                   self.in_a = False
-                  self.current_href = ""
-                  self.current_text = ""
 
-              def handle_starttag(self, tag, attrs):
+                  self.href = ""
+                  self.text = ""
+
+              def handle_starttag(
+                  self,
+                  tag,
+                  attrs
+              ):
+                  attrs = dict(attrs)
+
+                  classes = (
+                      attrs.get(
+                          "class",
+                          ""
+                      ) or ""
+                  ).lower()
+
+                  if tag in (
+                      "article",
+                      "li"
+                  ):
+                      if any(
+                          word in classes
+                          for word in (
+                              "product",
+                              "post",
+                              "item"
+                          )
+                      ):
+                          self.in_article = True
+
                   if tag == "a":
-                      attrs = dict(attrs)
-                      href = attrs.get("href", "")
-                      title = attrs.get("title", "")
-                      aria = attrs.get("aria-label", "")
+                      href = attrs.get(
+                          "href",
+                          ""
+                      )
 
-                      self.in_a = True
-                      self.current_href = href
-                      self.current_text = clean_text(title + " " + aria)
+                      if href:
+                          self.in_a = True
+                          self.href = href
+                          self.text = clean_text(
+                              attrs.get(
+                                  "title",
+                                  ""
+                              )
+                              + " "
+                              + attrs.get(
+                                  "aria-label",
+                                  ""
+                              )
+                          )
 
-              def handle_data(self, data):
+              def handle_data(
+                  self,
+                  data
+              ):
                   if self.in_a:
-                      self.current_text += " " + clean_text(data)
+                      self.text += " " + clean_text(
+                          data
+                      )
 
-              def handle_endtag(self, tag):
+              def handle_endtag(
+                  self,
+                  tag
+              ):
                   if tag == "a" and self.in_a:
-                      if self.current_href:
-                          self.links.append((clean_text(self.current_text), self.current_href))
-                      self.in_a = False
-                      self.current_href = ""
-                      self.current_text = ""
 
-          def html_products(site):
-              html = fetch(site["url"])
-              parser = ProductLinkParser()
+                      if self.href:
+                          self.products.append(
+                              (
+                                  clean_text(
+                                      self.text
+                                  ),
+                                  self.href
+                              )
+                          )
+
+                      self.in_a = False
+                      self.href = ""
+                      self.text = ""
+
+                  if tag in (
+                      "article",
+                      "li"
+                  ):
+                      self.in_article = False
+
+          def parse_rumble(site):
+
+              html = fetch(
+                  site["url"]
+              )
+
+              parser = RumbleParser()
+
               parser.feed(html)
 
-              found = {}
+              products = {}
 
-              for text, href in parser.links:
-                  full_url = clean_url(urljoin(site["url"], href))
-                  combined = clean_text(text + " " + full_url)
+              for title, href in parser.products:
 
-                  if looks_like_product_url(full_url) and matches(combined):
-                      found[full_url] = {
-                          "site": site["name"],
-                          "title": text if text else full_url,
-                          "url": full_url
-                      }
+                  url = clean_url(
+                      urljoin(
+                          site["url"],
+                          href
+                      )
+                  )
 
-              return list(found.values())
+                  if is_bad_url(url):
+                      continue
 
-          state_exists = os.path.exists(STATE_FILE)
-          seen = load_seen()
+                  # Rumble usa /carte-collezionabili/
+                  # per i prodotti, ma NON deve essere
+                  # una semplice categoria.
+                  path = urlparse(url).path.lower()
+
+                  if path.rstrip("/") == "/carte-collezionabili":
+                      continue
+
+                  if path.rstrip("/").endswith(
+                      "/one-piece"
+                  ):
+                      continue
+
+                  if path.rstrip("/").endswith(
+                      "/pokemon"
+                  ):
+                      continue
+
+                  if path.rstrip("/").endswith(
+                      "/dragonball-super-card-game-fusion-world"
+                  ):
+                      continue
+
+                  if not matches(
+                      title + " " + url
+                  ):
+                      continue
+
+                  # Deve sembrare una vera scheda prodotto.
+                  segments = [
+                      x for x in path.split("/")
+                      if x
+                  ]
+
+                  if len(segments) < 3:
+                      continue
+
+                  if title.lower().startswith(
+                      "view all posts"
+                  ):
+                      continue
+
+                  if title.lower().startswith(
+                      "aggiungi al carrello"
+                  ):
+                      continue
+
+                  if title.lower().startswith(
+                      "leggi di più"
+                  ):
+                      title = re.sub(
+                          r'^Leggi di più su\s+',
+                          '',
+                          title,
+                          flags=re.I
+                      )
+
+                  if not title:
+                      continue
+
+                  products[url] = {
+                      "site": site["name"],
+                      "title": title[:180],
+                      "url": url,
+                      "available": None
+                  }
+
+              return list(
+                  products.values()
+              )
+
+          class GenericParser(HTMLParser):
+
+              def __init__(self):
+                  super().__init__()
+
+                  self.links = []
+
+                  self.in_a = False
+                  self.href = ""
+                  self.text = ""
+
+              def handle_starttag(
+                  self,
+                  tag,
+                  attrs
+              ):
+                  if tag != "a":
+                      return
+
+                  attrs = dict(attrs)
+
+                  href = attrs.get(
+                      "href",
+                      ""
+                  )
+
+                  if not href:
+                      return
+
+                  self.in_a = True
+                  self.href = href
+
+                  self.text = clean_text(
+                      attrs.get(
+                          "title",
+                          ""
+                      )
+                      + " "
+                      + attrs.get(
+                          "aria-label",
+                          ""
+                      )
+                  )
+
+              def handle_data(
+                  self,
+                  data
+              ):
+                  if self.in_a:
+                      self.text += " " + clean_text(
+                          data
+                      )
+
+              def handle_endtag(
+                  self,
+                  tag
+              ):
+                  if tag == "a" and self.in_a:
+
+                      self.links.append(
+                          (
+                              clean_text(
+                                  self.text
+                              ),
+                              self.href
+                          )
+                      )
+
+                      self.in_a = False
+                      self.href = ""
+                      self.text = ""
+
+          def parse_generic(site):
+
+              html = fetch(
+                  site["url"]
+              )
+
+              parser = GenericParser()
+
+              parser.feed(html)
+
+              products = {}
+
+              for title, href in parser.links:
+
+                  url = clean_url(
+                      urljoin(
+                          site["url"],
+                          href
+                      )
+                  )
+
+                  if is_bad_url(url):
+                      continue
+
+                  if not matches(
+                      title + " " + url
+                  ):
+                      continue
+
+                  # Solo URL che sembrano veramente
+                  # pagine prodotto.
+                  path = urlparse(url).path.lower()
+
+                  if not any(
+                      x in path
+                      for x in (
+                          "/product/",
+                          "/products/",
+                          "/prodotto/"
+                      )
+                  ):
+                      continue
+
+                  if not title:
+                      continue
+
+                  products[url] = {
+                      "site": site["name"],
+                      "title": title[:180],
+                      "url": url,
+                      "available": None
+                  }
+
+              return list(
+                  products.values()
+              )
+
+          state = load_state()
+
+          first_run = not os.path.exists(
+              STATE_FILE
+          )
+
           alerts = []
 
           for site in SITES:
+
               try:
-                  products = shopify_products(site) if site["type"] == "shopify" else html_products(site)
 
-                  print(f"{site['name']}: trovati {len(products)} prodotti compatibili")
+                  if site["type"] == "shopify":
+                      products = parse_shopify(
+                          site
+                      )
 
-                  for p in products:
-                      key = p["site"] + "|" + p["url"]
+                  elif site["type"] == "rumble":
+                      products = parse_rumble(
+                          site
+                      )
 
-                      if key not in seen:
-                          seen[key] = {
-                              "title": p["title"],
-                              "url": p["url"]
+                  else:
+                      products = parse_generic(
+                          site
+                      )
+
+                  print(
+                      f"{site['name']}: "
+                      f"{len(products)} prodotti trovati"
+                  )
+
+                  for product in products:
+
+                      key = (
+                          product["site"]
+                          + "|"
+                          + product["url"]
+                      )
+
+                      old = state.get(
+                          key
+                      )
+
+                      if old is None:
+
+                          state[key] = {
+                              "site": product["site"],
+                              "title": product["title"],
+                              "url": product["url"],
+                              "available": product["available"]
                           }
 
-                          if state_exists:
+                          if not first_run:
+
                               alerts.append(
-                                  f"🚨 Nuovo prodotto su {p['site']}\n\n{p['title']}\n{p['url']}"
+                                  "🆕 NUOVO PRODOTTO\n\n"
+                                  f"🏪 {product['site']}\n"
+                                  f"📦 {product['title']}\n"
+                                  f"🔗 {product['url']}"
                               )
 
-              except Exception as e:
-                  print(f"Errore su {site['name']}: {e}")
+                      else:
 
-          if not state_exists:
-              send_telegram("✅ Monitor reinizializzato. Ho salvato i prodotti già presenti: da ora ti avviso solo sui nuovi caricamenti.")
+                          old_available = old.get(
+                              "available"
+                          )
+
+                          new_available = product.get(
+                              "available"
+                          )
+
+                          # Restock solo quando abbiamo
+                          # una prova reale di cambio stato.
+                          if (
+                              old_available is False
+                              and new_available is True
+                          ):
+
+                              state[key][
+                                  "available"
+                              ] = True
+
+                              alerts.append(
+                                  "🔄 RESTOCK\n\n"
+                                  f"🏪 {product['site']}\n"
+                                  f"📦 {product['title']}\n"
+                                  f"🔗 {product['url']}"
+                              )
+
+              except Exception as error:
+
+                  print(
+                      f"ERRORE {site['name']}: "
+                      f"{error}"
+                  )
+
+          if first_run:
+
+              send_telegram(
+                  "✅ Monitor inizializzato.\n\n"
+                  "Ho importato e ripulito lo storico esistente.\n"
+                  "Da ora riceverai notifiche solo per nuovi prodotti "
+                  "e restock rilevati con certezza."
+              )
+
           else:
-              for alert in alerts[:20]:
-                  send_telegram(alert)
 
-          save_seen(seen)
+              for alert in alerts[:20]:
+                  send_telegram(
+                      alert
+                  )
+
+          save_state(
+              state
+          )
+
+          print(
+              f"Notifiche inviate: {len(alerts)}"
+          )
           PY
+
+          python monitor.py
 
       - name: Commit state
         run: |
@@ -235,5 +798,5 @@ jobs:
           git config user.email "github-actions@github.com"
           git pull --rebase origin main || true
           git add seen_products.json
-          git commit -m "Update seen products" || echo "No changes"
+          git commit -m "Update product state" || echo "No changes"
           git push || echo "Push skipped"
