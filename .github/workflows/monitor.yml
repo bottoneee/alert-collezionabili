@@ -45,6 +45,7 @@ jobs:
               "pokemon",
               "pokémon",
               "dragon ball",
+              "dragonball",
               "fusion world",
               "one piece",
               "booster box",
@@ -88,77 +89,100 @@ jobs:
           ]
 
           SITES = [
+
+              # -------------------------
+              # SHOPIFY
+              # -------------------------
+
               {
                   "name": "Team Rocket Italia",
                   "url": "https://teamrocketitalia.it/collections/pre-ordini-1/products.json?limit=250",
                   "type": "shopify"
               },
+
               {
                   "name": "Gallery Concept",
                   "url": "https://galleryconcept.it/collections/card-game/products.json?limit=250",
                   "type": "shopify"
               },
+
+              # -------------------------
+              # RUMBLE STORE
+              # -------------------------
+
               {
                   "name": "Rumble Store",
                   "url": "https://www.rumble-store.com/carte-collezionabili/",
                   "type": "rumble"
               },
+
+              # -------------------------
+              # IL COVO DEL NERD
+              # -------------------------
+
               {
-                  "name": "Il Covo del Nerd",
-                  "url": "https://www.ilcovodelnerd.com/categoria-prodotto/carte-e-figurine-da-collezione/",
-                  "type": "html"
+                  "name": "Il Covo del Nerd - One Piece",
+                  "url": "https://www.ilcovodelnerd.com/categoria-prodotto/prodotti-sigillati/?rb_categories=One%20Piece%20TCG",
+                  "type": "covo"
               },
+
+              {
+                  "name": "Il Covo del Nerd - One Piece + Dragon Ball",
+                  "url": "https://www.ilcovodelnerd.com/categoria-prodotto/prodotti-sigillati/?rb_categories=One%20Piece%20TCG%7CDragon%20Ball%20Super%20Card%20Game",
+                  "type": "covo"
+              },
+
+              {
+                  "name": "Il Covo del Nerd - One Piece + Dragon Ball + Pokemon",
+                  "url": "https://www.ilcovodelnerd.com/categoria-prodotto/prodotti-sigillati/?rb_categories=One%20Piece%20TCG%7CDragon%20Ball%20Super%20Card%20Game%7CPok%C3%A9mon",
+                  "type": "covo"
+              },
+
+              # -------------------------
+              # ALTRI SITI
+              # -------------------------
+
               {
                   "name": "JPY Collectibles",
                   "url": "https://jpycollectibles.com/",
-                  "type": "html"
+                  "type": "generic"
               },
+
               {
                   "name": "Toys Center",
                   "url": "https://www.toyscenter.it/search?q=pokemon",
-                  "type": "html"
+                  "type": "generic"
               },
+
               {
                   "name": "Goathings",
                   "url": "https://goathings.it/",
-                  "type": "html"
+                  "type": "generic"
               },
+
               {
                   "name": "Mangakaze",
                   "url": "https://www.mangakaze.com/",
-                  "type": "html"
+                  "type": "generic"
               },
+
               {
                   "name": "Mirabilia Store",
                   "url": "https://mirabiliastore.it/",
-                  "type": "html"
+                  "type": "generic"
               }
           ]
 
-          BAD_PATHS = [
-              "/collections/",
-              "/collection/",
-              "/category/",
-              "/categorie/",
-              "/categoria/",
-              "/categoria-prodotto/",
-              "/tag/",
-              "/pages/",
-              "/page/",
-              "/blog/",
-              "/search",
-              "/account",
-              "/cart",
-              "/carrello",
-              "/checkout",
-              "/wishlist"
-          ]
+          # ------------------------------------------------
+          # FUNZIONI BASE
+          # ------------------------------------------------
 
           def clean_text(text):
               return re.sub(r"\s+", " ", text or "").strip()
 
           def clean_url(url):
               parsed = urlparse(url)
+
               return urlunparse(
                   (
                       parsed.scheme,
@@ -179,7 +203,11 @@ jobs:
                   }
               )
 
-              with urllib.request.urlopen(request, timeout=30) as response:
+              with urllib.request.urlopen(
+                  request,
+                  timeout=30
+              ) as response:
+
                   return response.read().decode(
                       "utf-8",
                       errors="ignore"
@@ -187,18 +215,14 @@ jobs:
 
           def matches(text):
               text = (text or "").lower()
-              return any(keyword in text for keyword in KEYWORDS)
 
-          def is_bad_url(url):
-              url = url.lower()
-
-              for bad in BAD_PATHS:
-                  if bad in url:
-                      return True
-
-              return False
+              return any(
+                  keyword in text
+                  for keyword in KEYWORDS
+              )
 
           def send_telegram(message):
+
               data = urllib.parse.urlencode(
                   {
                       "chat_id": os.environ["TELEGRAM_CHAT_ID"],
@@ -208,44 +232,74 @@ jobs:
               ).encode()
 
               request = urllib.request.Request(
-                  f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage",
+                  "https://api.telegram.org/bot"
+                  + os.environ["TELEGRAM_TOKEN"]
+                  + "/sendMessage",
                   data=data
               )
 
-              urllib.request.urlopen(request, timeout=30)
+              urllib.request.urlopen(
+                  request,
+                  timeout=30
+              )
+
+          # ------------------------------------------------
+          # STORICO
+          # ------------------------------------------------
 
           def load_state():
-              if not os.path.exists(STATE_FILE):
+
+              if not os.path.exists(
+                  STATE_FILE
+              ):
                   return {}
 
               try:
+
                   with open(
                       STATE_FILE,
                       "r",
                       encoding="utf-8"
                   ) as file:
+
                       raw = json.load(file)
+
               except Exception:
+
                   return {}
 
               state = {}
 
-              # Migrazione dal vecchio formato:
-              # lista di stringhe -> dizionario
+              # Migrazione vecchio formato
               if isinstance(raw, list):
+
                   for item in raw:
-                      if not isinstance(item, str):
+
+                      if not isinstance(
+                          item,
+                          str
+                      ):
                           continue
 
                       parts = item.split("|")
 
                       if len(parts) >= 3:
+
                           site = parts[0]
                           title = parts[1]
-                          url = clean_url("|".join(parts[2:]))
+                          url = clean_url(
+                              "|".join(
+                                  parts[2:]
+                              )
+                          )
 
-                          if not is_bad_url(url):
-                              key = site + "|" + url
+                          if url:
+
+                              key = (
+                                  site
+                                  + "|"
+                                  + url
+                              )
 
                               state[key] = {
                                   "site": site,
@@ -256,19 +310,27 @@ jobs:
 
                   return state
 
-              if isinstance(raw, dict):
+              if isinstance(
+                  raw,
+                  dict
+              ):
+
                   for key, value in raw.items():
-                      if not isinstance(value, dict):
+
+                      if not isinstance(
+                          value,
+                          dict
+                      ):
                           continue
 
                       url = clean_url(
-                          value.get("url", "")
+                          value.get(
+                              "url",
+                              ""
+                          )
                       )
 
                       if not url:
-                          continue
-
-                      if is_bad_url(url):
                           continue
 
                       state[key] = value
@@ -276,11 +338,13 @@ jobs:
               return state
 
           def save_state(state):
+
               with open(
                   STATE_FILE,
                   "w",
                   encoding="utf-8"
               ) as file:
+
                   json.dump(
                       state,
                       file,
@@ -289,7 +353,12 @@ jobs:
                       sort_keys=True
                   )
 
+          # ------------------------------------------------
+          # SHOPIFY
+          # ------------------------------------------------
+
           def parse_shopify(site):
+
               data = json.loads(
                   fetch(site["url"])
               )
@@ -304,6 +373,7 @@ jobs:
                   "products",
                   []
               ):
+
                   title = clean_text(
                       product.get(
                           "title",
@@ -329,7 +399,9 @@ jobs:
                   )
 
                   available = any(
-                      variant.get("available") is True
+                      variant.get(
+                          "available"
+                      ) is True
                       for variant in product.get(
                           "variants",
                           []
@@ -347,201 +419,16 @@ jobs:
 
               return products
 
-          class RumbleParser(HTMLParser):
+          # ------------------------------------------------
+          # RUMBLE
+          # ------------------------------------------------
+
+          class RumbleParser(
+              HTMLParser
+          ):
 
               def __init__(self):
-                  super().__init__()
 
-                  self.products = []
-
-                  self.in_article = False
-                  self.in_a = False
-
-                  self.href = ""
-                  self.text = ""
-
-              def handle_starttag(
-                  self,
-                  tag,
-                  attrs
-              ):
-                  attrs = dict(attrs)
-
-                  classes = (
-                      attrs.get(
-                          "class",
-                          ""
-                      ) or ""
-                  ).lower()
-
-                  if tag in (
-                      "article",
-                      "li"
-                  ):
-                      if any(
-                          word in classes
-                          for word in (
-                              "product",
-                              "post",
-                              "item"
-                          )
-                      ):
-                          self.in_article = True
-
-                  if tag == "a":
-                      href = attrs.get(
-                          "href",
-                          ""
-                      )
-
-                      if href:
-                          self.in_a = True
-                          self.href = href
-                          self.text = clean_text(
-                              attrs.get(
-                                  "title",
-                                  ""
-                              )
-                              + " "
-                              + attrs.get(
-                                  "aria-label",
-                                  ""
-                              )
-                          )
-
-              def handle_data(
-                  self,
-                  data
-              ):
-                  if self.in_a:
-                      self.text += " " + clean_text(
-                          data
-                      )
-
-              def handle_endtag(
-                  self,
-                  tag
-              ):
-                  if tag == "a" and self.in_a:
-
-                      if self.href:
-                          self.products.append(
-                              (
-                                  clean_text(
-                                      self.text
-                                  ),
-                                  self.href
-                              )
-                          )
-
-                      self.in_a = False
-                      self.href = ""
-                      self.text = ""
-
-                  if tag in (
-                      "article",
-                      "li"
-                  ):
-                      self.in_article = False
-
-          def parse_rumble(site):
-
-              html = fetch(
-                  site["url"]
-              )
-
-              parser = RumbleParser()
-
-              parser.feed(html)
-
-              products = {}
-
-              for title, href in parser.products:
-
-                  url = clean_url(
-                      urljoin(
-                          site["url"],
-                          href
-                      )
-                  )
-
-                  if is_bad_url(url):
-                      continue
-
-                  # Rumble usa /carte-collezionabili/
-                  # per i prodotti, ma NON deve essere
-                  # una semplice categoria.
-                  path = urlparse(url).path.lower()
-
-                  if path.rstrip("/") == "/carte-collezionabili":
-                      continue
-
-                  if path.rstrip("/").endswith(
-                      "/one-piece"
-                  ):
-                      continue
-
-                  if path.rstrip("/").endswith(
-                      "/pokemon"
-                  ):
-                      continue
-
-                  if path.rstrip("/").endswith(
-                      "/dragonball-super-card-game-fusion-world"
-                  ):
-                      continue
-
-                  if not matches(
-                      title + " " + url
-                  ):
-                      continue
-
-                  # Deve sembrare una vera scheda prodotto.
-                  segments = [
-                      x for x in path.split("/")
-                      if x
-                  ]
-
-                  if len(segments) < 3:
-                      continue
-
-                  if title.lower().startswith(
-                      "view all posts"
-                  ):
-                      continue
-
-                  if title.lower().startswith(
-                      "aggiungi al carrello"
-                  ):
-                      continue
-
-                  if title.lower().startswith(
-                      "leggi di più"
-                  ):
-                      title = re.sub(
-                          r'^Leggi di più su\s+',
-                          '',
-                          title,
-                          flags=re.I
-                      )
-
-                  if not title:
-                      continue
-
-                  products[url] = {
-                      "site": site["name"],
-                      "title": title[:180],
-                      "url": url,
-                      "available": None
-                  }
-
-              return list(
-                  products.values()
-              )
-
-          class GenericParser(HTMLParser):
-
-              def __init__(self):
                   super().__init__()
 
                   self.links = []
@@ -555,6 +442,7 @@ jobs:
                   tag,
                   attrs
               ):
+
                   if tag != "a":
                       return
 
@@ -587,7 +475,9 @@ jobs:
                   self,
                   data
               ):
+
                   if self.in_a:
+
                       self.text += " " + clean_text(
                           data
                       )
@@ -596,7 +486,337 @@ jobs:
                   self,
                   tag
               ):
-                  if tag == "a" and self.in_a:
+
+                  if (
+                      tag == "a"
+                      and self.in_a
+                  ):
+
+                      self.links.append(
+                          (
+                              clean_text(
+                                  self.text
+                              ),
+                              self.href
+                          )
+                      )
+
+                      self.in_a = False
+                      self.href = ""
+                      self.text = ""
+
+          def is_rumble_product(url):
+
+              path = urlparse(
+                  url
+              ).path.lower().rstrip("/")
+
+              # Deve appartenere alla sezione
+              # carte collezionabili.
+              if not path.startswith(
+                  "/carte-collezionabili/"
+              ):
+                  return False
+
+              # Queste sono categorie, NON prodotti.
+              blocked = [
+                  "/carte-collezionabili/one-piece",
+                  "/carte-collezionabili/pokemon",
+                  "/carte-collezionabili/dragonball-super-card-game-fusion-world",
+                  "/carte-collezionabili/dragonball-super-cg-masters"
+              ]
+
+              for item in blocked:
+
+                  if path == item:
+                      return False
+
+              # Un prodotto Rumble ha normalmente
+              # almeno tre segmenti:
+              #
+              # /carte-collezionabili/
+              # /one-piece/
+              # /nome-prodotto/
+              #
+              segments = [
+                  x
+                  for x in path.split("/")
+                  if x
+              ]
+
+              return len(segments) >= 3
+
+          def parse_rumble(site):
+
+              html = fetch(
+                  site["url"]
+              )
+
+              parser = RumbleParser()
+
+              parser.feed(html)
+
+              products = {}
+
+              for title, href in parser.links:
+
+                  url = clean_url(
+                      urljoin(
+                          site["url"],
+                          href
+                      )
+                  )
+
+                  if not is_rumble_product(
+                      url
+                  ):
+                      continue
+
+                  if not matches(
+                      title + " " + url
+                  ):
+                      continue
+
+                  if title.lower().startswith(
+                      "view all posts"
+                  ):
+                      continue
+
+                  if title.lower().startswith(
+                      "aggiungi al carrello"
+                  ):
+                      continue
+
+                  title = re.sub(
+                      r"^leggi di più su\s*",
+                      "",
+                      title,
+                      flags=re.I
+                  )
+
+                  if not title:
+                      continue
+
+                  products[url] = {
+                      "site": site["name"],
+                      "title": title[:180],
+                      "url": url,
+                      "available": None
+                  }
+
+              return list(
+                  products.values()
+              )
+
+          # ------------------------------------------------
+          # IL COVO DEL NERD
+          # ------------------------------------------------
+
+          class CovoParser(
+              HTMLParser
+          ):
+
+              def __init__(self):
+
+                  super().__init__()
+
+                  self.links = []
+
+                  self.in_a = False
+                  self.href = ""
+                  self.text = ""
+
+              def handle_starttag(
+                  self,
+                  tag,
+                  attrs
+              ):
+
+                  if tag != "a":
+                      return
+
+                  attrs = dict(attrs)
+
+                  href = attrs.get(
+                      "href",
+                      ""
+                  )
+
+                  if not href:
+                      return
+
+                  self.in_a = True
+                  self.href = href
+
+                  self.text = clean_text(
+                      attrs.get(
+                          "title",
+                          ""
+                      )
+                      + " "
+                      + attrs.get(
+                          "aria-label",
+                          ""
+                      )
+                  )
+
+              def handle_data(
+                  self,
+                  data
+              ):
+
+                  if self.in_a:
+
+                      self.text += " " + clean_text(
+                          data
+                      )
+
+              def handle_endtag(
+                  self,
+                  tag
+              ):
+
+                  if (
+                      tag == "a"
+                      and self.in_a
+                  ):
+
+                      self.links.append(
+                          (
+                              clean_text(
+                                  self.text
+                              ),
+                              self.href
+                          )
+                      )
+
+                      self.in_a = False
+                      self.href = ""
+                      self.text = ""
+
+          def parse_covo(site):
+
+              html = fetch(
+                  site["url"]
+              )
+
+              parser = CovoParser()
+
+              parser.feed(html)
+
+              products = {}
+
+              for title, href in parser.links:
+
+                  url = clean_url(
+                      urljoin(
+                          site["url"],
+                          href
+                      )
+                  )
+
+                  path = urlparse(
+                      url
+                  ).path.lower()
+
+                  # Il Covo ha vere schede prodotto
+                  # sotto /shop/prodotti-sigillati/
+                  if not path.startswith(
+                      "/shop/prodotti-sigillati/"
+                  ):
+                      continue
+
+                  if not title:
+                      continue
+
+                  if not matches(
+                      title + " " + url
+                  ):
+                      continue
+
+                  products[url] = {
+                      "site": "Il Covo del Nerd",
+                      "title": title[:180],
+                      "url": url,
+                      "available": None
+                  }
+
+              return list(
+                  products.values()
+              )
+
+          # ------------------------------------------------
+          # GENERIC
+          # ------------------------------------------------
+
+          class GenericParser(
+              HTMLParser
+          ):
+
+              def __init__(self):
+
+                  super().__init__()
+
+                  self.links = []
+
+                  self.in_a = False
+                  self.href = ""
+                  self.text = ""
+
+              def handle_starttag(
+                  self,
+                  tag,
+                  attrs
+              ):
+
+                  if tag != "a":
+                      return
+
+                  attrs = dict(attrs)
+
+                  href = attrs.get(
+                      "href",
+                      ""
+                  )
+
+                  if not href:
+                      return
+
+                  self.in_a = True
+                  self.href = href
+
+                  self.text = clean_text(
+                      attrs.get(
+                          "title",
+                          ""
+                      )
+                      + " "
+                      + attrs.get(
+                          "aria-label",
+                          ""
+                      )
+                  )
+
+              def handle_data(
+                  self,
+                  data
+              ):
+
+                  if self.in_a:
+
+                      self.text += " " + clean_text(
+                          data
+                      )
+
+              def handle_endtag(
+                  self,
+                  tag
+              ):
+
+                  if (
+                      tag == "a"
+                      and self.in_a
+                  ):
 
                       self.links.append(
                           (
@@ -632,29 +852,23 @@ jobs:
                       )
                   )
 
-                  if is_bad_url(url):
-                      continue
+                  path = urlparse(
+                      url
+                  ).path.lower()
 
                   if not matches(
                       title + " " + url
                   ):
                       continue
 
-                  # Solo URL che sembrano veramente
-                  # pagine prodotto.
-                  path = urlparse(url).path.lower()
-
                   if not any(
-                      x in path
-                      for x in (
+                      marker in path
+                      for marker in (
                           "/product/",
                           "/products/",
                           "/prodotto/"
                       )
                   ):
-                      continue
-
-                  if not title:
                       continue
 
                   products[url] = {
@@ -668,11 +882,15 @@ jobs:
                   products.values()
               )
 
-          state = load_state()
+          # ------------------------------------------------
+          # MAIN
+          # ------------------------------------------------
 
-          first_run = not os.path.exists(
+          state_exists = os.path.exists(
               STATE_FILE
           )
+
+          state = load_state()
 
           alerts = []
 
@@ -681,16 +899,25 @@ jobs:
               try:
 
                   if site["type"] == "shopify":
+
                       products = parse_shopify(
                           site
                       )
 
                   elif site["type"] == "rumble":
+
                       products = parse_rumble(
                           site
                       )
 
+                  elif site["type"] == "covo":
+
+                      products = parse_covo(
+                          site
+                      )
+
                   else:
+
                       products = parse_generic(
                           site
                       )
@@ -702,8 +929,19 @@ jobs:
 
                   for product in products:
 
+                      # Il Covo ha tre filtri diversi,
+                      # ma lo stesso prodotto deve essere
+                      # considerato UNA sola volta.
+                      canonical_site = (
+                          "Il Covo del Nerd"
+                          if product["site"].startswith(
+                              "Il Covo del Nerd"
+                          )
+                          else product["site"]
+                      )
+
                       key = (
-                          product["site"]
+                          canonical_site
                           + "|"
                           + product["url"]
                       )
@@ -715,17 +953,17 @@ jobs:
                       if old is None:
 
                           state[key] = {
-                              "site": product["site"],
+                              "site": canonical_site,
                               "title": product["title"],
                               "url": product["url"],
                               "available": product["available"]
                           }
 
-                          if not first_run:
+                          if state_exists:
 
                               alerts.append(
                                   "🆕 NUOVO PRODOTTO\n\n"
-                                  f"🏪 {product['site']}\n"
+                                  f"🏪 {canonical_site}\n"
                                   f"📦 {product['title']}\n"
                                   f"🔗 {product['url']}"
                               )
@@ -740,8 +978,8 @@ jobs:
                               "available"
                           )
 
-                          # Restock solo quando abbiamo
-                          # una prova reale di cambio stato.
+                          # Restock certo solo quando
+                          # abbiamo due stati espliciti.
                           if (
                               old_available is False
                               and new_available is True
@@ -753,7 +991,7 @@ jobs:
 
                               alerts.append(
                                   "🔄 RESTOCK\n\n"
-                                  f"🏪 {product['site']}\n"
+                                  f"🏪 {canonical_site}\n"
                                   f"📦 {product['title']}\n"
                                   f"🔗 {product['url']}"
                               )
@@ -765,18 +1003,20 @@ jobs:
                       f"{error}"
                   )
 
-          if first_run:
+          if not state_exists:
 
               send_telegram(
-                  "✅ Monitor inizializzato.\n\n"
-                  "Ho importato e ripulito lo storico esistente.\n"
-                  "Da ora riceverai notifiche solo per nuovi prodotti "
-                  "e restock rilevati con certezza."
+                  "✅ Monitor aggiornato.\n\n"
+                  "Ho importato lo storico esistente "
+                  "senza inviare notifiche per i prodotti già presenti.\n\n"
+                  "Da ora riceverai solo nuovi prodotti "
+                  "e restock rilevati."
               )
 
           else:
 
               for alert in alerts[:20]:
+
                   send_telegram(
                       alert
                   )
